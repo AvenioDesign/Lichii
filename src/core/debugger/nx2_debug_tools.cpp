@@ -390,6 +390,19 @@ json SampleThreads(ToolState& state, const json& params) {
     return {{"file", path.generic_string()}, {"report", std::move(report)}};
 }
 
+json SetSwitch(ToolState&, const json& params) {
+    const std::string name = params.at("name").get<std::string>();
+    auto* const value = VideoCore::Nx2Debug::FindSwitch(name);
+    if (value == nullptr) {
+        throw std::runtime_error{fmt::format("unknown live switch {}", name)};
+    }
+    const int previous = value->load(std::memory_order_relaxed);
+    if (params.contains("value")) {
+        value->store(params.at("value").get<int>(), std::memory_order_relaxed);
+    }
+    return {{"name", name}, {"previous", previous}, {"value", value->load()}};
+}
+
 json ReadMemory(ToolState& state, const json& params) {
     const u64 address = AddressParam(params, "address");
     const u64 size = ReadSize(params, address);
@@ -583,6 +596,7 @@ Handlers MakeHandlers(const std::shared_ptr<ToolState>& state) {
         {"capture_frame", handler(CaptureFrame)},
         {"reject_shaders", handler(RejectShaders)},
         {"sample", handler(SampleThreads)},
+        {"switch", handler(SetSwitch)},
         {"read_memory", handler(ReadMemory)},
         {"search_memory", handler(SearchMemory)},
         {"read_gpu_memory", handler(ReadGpuMemory)},

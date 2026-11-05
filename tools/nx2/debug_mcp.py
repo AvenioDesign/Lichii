@@ -139,6 +139,18 @@ TOOLS = [
         },
     },
     {
+        "name": "switch",
+        "description": "Reads or sets a live experiment switch (EDEN_NX2_DMA_WAIT_WRITERS).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "value": {"type": "integer"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
         "name": "read_memory",
         "description": "Reads up to 64 KiB of the game's guest virtual memory, read only and "
                        "while it runs. 'as' formats it: hex (default), u32, u64 (hex strings) or "
