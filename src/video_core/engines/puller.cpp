@@ -98,23 +98,33 @@ bool Puller::CanResumeAcquire(DmaPusher& dma_pusher) {
     // Fast path (EDEN_NX2_SEM_FAST), as for the first check in ProcessSemaphoreTriggerMethod:
     // when the word is current without draining the back, answer from it. Ocarina of Time polls
     // each waiting acquire about 12 times before it is met, and every poll drained the back
-    // (about 380 ms/s of the front's time). A poll that is not met for 2 s takes the drained
-    // path below, which reports it.
+    // (about 380 ms/s of the front's time). The drained path below runs now and then for an
+    // unmet word, and reports an acquire not met for 2 s.
     if (Nx2SemaphoreWaiters::Get().Latched(this)) {
         // The back ran a release that met the value and latched this waiter: resume at once.
         VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::AcquirePollsFast, 1);
         return true;
     }
-    if (pending_acquire->reported ||
-        std::chrono::steady_clock::now() - pending_acquire->since < std::chrono::seconds{2}) {
-        if (u32 word{}; SemaphoreReadableNow(dma_pusher, pending_acquire->address, word)) {
+    if (u32 word{}; SemaphoreReadableNow(dma_pusher, pending_acquire->address, word)) {
+        if (pending_acquire->Matches(word)) {
             VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::AcquirePollsFast, 1);
-            return pending_acquire->Matches(word);
+            return true;
+        }
+        // An unmet word is answered without a drain for at most 16 polls or 1 ms since the back
+        // was last drained for this acquire. A release the back holds as deferred work lands only
+        // when the back runs, so a channel polled without ever draining again waited forever
+        // (Mario Kart World hung after 63 s once the 2 s report had been made).
+        const auto now = std::chrono::steady_clock::now();
+        if (++pending_acquire->unmet_polls % 16 != 0 &&
+            now - pending_acquire->last_drain < std::chrono::milliseconds{1}) {
+            VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::AcquirePollsFast, 1);
+            return false;
         }
     }
     // The release may still be queued for the split GPU thread's back half (and the caches
     // ReadSemaphoreWord asks are its state).
     DrainBack();
+    pending_acquire->last_drain = std::chrono::steady_clock::now();
     const u32 current = ReadSemaphoreWord(dma_pusher, pending_acquire->address);
     if (Nx2SemaphoreWaiters::Get().Latched(this)) {
         if (static std::atomic<u32> rescued{};
@@ -310,6 +320,7 @@ void Puller::ProcessSemaphoreTriggerMethod(DmaPusher& dma_pusher) {
                                  : acquire.Matches(ReadSemaphoreWord(dma_pusher, acquire.address));
         if (!waiters.Latched(this) && !met_now) {
             pending_acquire = acquire;
+            pending_acquire->last_drain = std::chrono::steady_clock::now();
             dma_pusher.suspensions.fetch_add(1, std::memory_order_release);
             VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::AcquireWaits, 1);
         } else {
