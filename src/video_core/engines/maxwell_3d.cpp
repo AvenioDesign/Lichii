@@ -1237,7 +1237,6 @@ bool Maxwell3D::FrontSkipsLoopWrite(FrontState& fs, u32 method, u32 value, bool 
     case MAXWELL3D_REG_INDEX(draw.end):
     case MAXWELL3D_REG_INDEX(vertex_buffer.first):
     case MAXWELL3D_REG_INDEX(vertex_buffer.count):
-    case MAXWELL3D_REG_INDEX(index_buffer.first):
         break;
     default:
         return false;
@@ -1247,7 +1246,8 @@ bool Maxwell3D::FrontSkipsLoopWrite(FrontState& fs, u32 method, u32 value, bool 
         return false;
     }
     // Instance loop methods: they flush no deferred draw, and the draw manager ignores these
-    // (DrawEnd draws nothing in an instance loop; the buffer firsts and counts are only read).
+    // (DrawEnd draws nothing in an instance loop; it only reads the vertex buffer first and count,
+    // and index_buffer writes also mark the index buffer dirty, so they are always sent).
     return method != MAXWELL3D_REG_INDEX(draw.end) || fs.instance_loop;
 }
 
