@@ -390,6 +390,8 @@ static void NoteSemaphoreWrite(DmaPusher& dma_pusher, GPUVAddr address,
     } else if (fence_payload) {
         split.NoteMemoryWriteData(*device, &*fence_payload, 1);
     } else {
+        // Written when its fence is signalled: reads of the page take the drained path.
+        Nx2MarkGpuWritten(*device, 16);
         split.NoteMemoryWrite(*device, 16, "semaphore (timed)");
     }
 }

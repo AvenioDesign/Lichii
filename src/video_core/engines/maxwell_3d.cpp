@@ -1271,6 +1271,9 @@ void Maxwell3D::FrontNoteMemoryWrite(VideoCommon::GpuSplit& split, FrontState& f
             const u32 payload = fs.regs[base + 2];
             split.NoteMemoryWriteData(*device, &payload, 1);
         } else {
+            // Counters and timed releases are written when the host query completes, not when
+            // the back runs them: reads of these pages take the drained path.
+            Tegra::Nx2MarkGpuWritten(*device, 16);
             split.NoteMemoryWrite(*device, 16, "3D report");
         }
         return;
