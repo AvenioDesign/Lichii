@@ -103,7 +103,7 @@ inline u64 Ticks() {
 struct ThreadData {
     std::array<u64, static_cast<size_t>(Zone::Count)> exclusive_ns{};
     std::array<u64, static_cast<size_t>(Zone::Count)> count{};
-    std::array<u64, 8> counters{}; ///< See Counter
+    std::array<u64, 15> counters{}; ///< See Counter
     std::array<u64, static_cast<size_t>(DrainSite::Count)> drain_ns{};
     std::array<u64, static_cast<size_t>(DrainSite::Count)> drain_count{};
     u64 child_ns{};    ///< Time of the zones nested in the current one
@@ -157,6 +157,13 @@ enum class Counter : u32 {
     SameValueWrites, ///< Of MethodWrites: the register already held the value
     AcquireChecks,  ///< Semaphore acquires evaluated
     AcquireWaits,   ///< Of AcquireChecks: not met yet (the channel waits)
+    AcquirePolls,   ///< Polls of a waiting acquire (Puller::CanResumeAcquire)
+    AcquirePollsFast, ///< Of AcquirePolls: answered from the word without draining the back
+    SemNoFastPath,    ///< SemaphoreReadableNow false: split off or EDEN_NX2_SEM_FAST=0
+    SemGpuWrittenPage, ///< SemaphoreReadableNow false: the word's page is marked GPU-written
+    SemAsyncPending,  ///< SemaphoreReadableNow false: a counter report or timed release is pending
+    SemWritersWait,   ///< SemaphoreReadableNow false: WaitForWritesTo gave up
+    AcquireNoDrain,   ///< Acquires of a current word not met yet that registered without a drain
 };
 
 /// Method calls on this thread by method (3D registers on the back, macros on the front), and
@@ -273,9 +280,19 @@ inline void Report(const char* thread_name = "GPU thread") {
     line += fmt::format(" | 3D register writes {:.0f} ({:.0f} same value)",
                         static_cast<double>(data.counters[4]) * 1e9 / window,
                         static_cast<double>(data.counters[5]) * 1e9 / window);
-    line += fmt::format(" | acquires {:.0f} ({:.0f} waited)",
+    line += fmt::format(" | acquires {:.0f} ({:.0f} waited, {:.0f} polls, {:.0f} without drain)",
                         static_cast<double>(data.counters[6]) * 1e9 / window,
-                        static_cast<double>(data.counters[7]) * 1e9 / window);
+                        static_cast<double>(data.counters[7]) * 1e9 / window,
+                        static_cast<double>(data.counters[8]) * 1e9 / window,
+                        static_cast<double>(data.counters[9]) * 1e9 / window);
+    line += fmt::format(" | semaphore word not readable: no fast path {:.0f}, GPU-written page {:.0f}, "
+                        "async pending {:.0f}, writers {:.0f}",
+                        static_cast<double>(data.counters[10]) * 1e9 / window,
+                        static_cast<double>(data.counters[11]) * 1e9 / window,
+                        static_cast<double>(data.counters[12]) * 1e9 / window,
+                        static_cast<double>(data.counters[13]) * 1e9 / window);
+    line += fmt::format(" | acquires registered without a drain {:.0f}",
+                        static_cast<double>(data.counters[14]) * 1e9 / window);
     std::string drains;
     for (size_t i = 0; i < data.drain_count.size(); ++i) {
         if (data.drain_count[i] != 0) {
