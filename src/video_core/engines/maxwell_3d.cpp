@@ -1272,8 +1272,9 @@ void Maxwell3D::FrontNoteMemoryWrite(VideoCommon::GpuSplit& split, FrontState& f
             split.NoteMemoryWriteData(*device, &payload, 1);
         } else {
             // Counters and timed releases are written when the host query completes, not when
-            // the back runs them: reads of these pages take the drained path.
-            Tegra::Nx2MarkGpuWritten(*device, 16);
+            // the back runs them: reads of these bytes wait until the back ran the report and
+            // the host query completed.
+            split.NoteAsyncWrite(*device, 16);
             split.NoteMemoryWrite(*device, 16, "3D report");
         }
         return;
@@ -1373,6 +1374,14 @@ void Maxwell3D::FrontDmaRead(VideoCommon::GpuSplit& split, FrontState& fs, u32 m
              page += 0x1000) {
             const auto device = memory_manager.GpuToCpuAddress(page);
             gpu_written |= !device || Tegra::Nx2IsGpuWritten(*device);
+        }
+        // The back ran the newest report to these bytes and its host query completed: the
+        // words in memory are what a drained read would see.
+        if (const auto device = memory_manager.GpuToCpuAddress(source); !gpu_written && device) {
+            const u64 async_position = split.HasAsyncWrite(*device, read_bytes);
+            gpu_written = async_position != 0 &&
+                          (async_position > split.ConsumedNow() ||
+                           !Tegra::Nx2AsyncReportsSettled(*device, read_bytes));
         }
         thread_local std::vector<u32> fast;
         fast.resize(words);

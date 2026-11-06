@@ -390,8 +390,8 @@ static void NoteSemaphoreWrite(DmaPusher& dma_pusher, GPUVAddr address,
     } else if (fence_payload) {
         split.NoteMemoryWriteData(*device, &*fence_payload, 1);
     } else {
-        // Written when its fence is signalled: reads of the page take the drained path.
-        Nx2MarkGpuWritten(*device, 16);
+        // Written when its fence is signalled: reads wait until the back ran it and it was.
+        split.NoteAsyncWrite(*device, 16);
         split.NoteMemoryWrite(*device, 16, "semaphore (timed)");
     }
 }
@@ -407,6 +407,11 @@ static bool SemaphoreReadableNow(DmaPusher& dma_pusher, GPUVAddr address, u32& w
     }
     const auto device = dma_pusher.memory_manager.GpuToCpuAddress(address);
     if (!device || Nx2IsGpuWritten(*device)) {
+        return false;
+    }
+    if (const u64 async_position = split.HasAsyncWrite(*device, 4);
+        async_position != 0 &&
+        (async_position > split.ConsumedNow() || !Nx2AsyncReportsSettled(*device, 4))) {
         return false;
     }
     if (mode >= 2) {
