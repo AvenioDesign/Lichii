@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -15,6 +16,19 @@
 #include "video_core/renderer_vulkan/async_draw_policy.h"
 
 namespace Vulkan {
+
+/// EDEN_NX2_FAST_FIRST=1: a pipeline built while the game runs is first created with
+/// VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT and drawn with as soon as the driver returns it;
+/// the optimized build follows on a worker and takes its place at a later draw. Trades the seconds
+/// the driver spends on the heaviest pipelines (a demanding Switch 2 test title, first visit:
+/// draws held up to 7 s of every 10 s) for a slower shader during that time.
+inline bool FastFirstBuildEnabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("EDEN_NX2_FAST_FIRST");
+        return value && *value && *value != '0';
+    }();
+    return enabled;
+}
 
 class EmissionBudget {
 public:
