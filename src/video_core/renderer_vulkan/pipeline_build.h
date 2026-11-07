@@ -30,6 +30,22 @@ inline bool FastFirstBuildEnabled() {
     return enabled;
 }
 
+/// EDEN_NX2_HEAVY_SKIP: a native pipeline of at least this many converted instructions (all
+/// stages) has its draws skipped while the driver builds it, instead of holding every draw
+/// behind it. "1" picks 4000; 0 or unset turns it off. In a demanding Switch 2 test title's first
+/// visits every driver build over 500 ms was above 4000, and they made ~90% of the compile time.
+inline size_t HeavySkipWords() {
+    static const size_t words = [] {
+        const char* value = std::getenv("EDEN_NX2_HEAVY_SKIP");
+        if (!value || !*value) {
+            return size_t{0};
+        }
+        const size_t parsed = static_cast<size_t>(std::strtoull(value, nullptr, 10));
+        return parsed == 1 ? size_t{4000} : parsed;
+    }();
+    return words;
+}
+
 class EmissionBudget {
 public:
     class Reservation {

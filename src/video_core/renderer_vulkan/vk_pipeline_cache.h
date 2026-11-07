@@ -130,6 +130,9 @@ public:
 
     void TickFrame();
 
+    /// EDEN_NX2_HEAVY_SKIP: a clear of these targets (0 = none) in the current frame.
+    void NoteClear(u64 color_address, u64 depth_address);
+
     [[nodiscard]] ComputePipeline* CurrentComputePipeline();
 
     void LoadDiskResources(u64 title_id, std::stop_token stop_loading,
@@ -139,8 +142,13 @@ private:
     [[nodiscard]] GraphicsPipeline* CurrentGraphicsPipelineSlowPath();
 
     /// Returns `pipeline` when it is built or its draw must wait for it, nullptr when the draw
-    /// may be skipped while it builds (asynchronous shaders, CanDiscardPendingDraw).
-    [[nodiscard]] GraphicsPipeline* BuiltPipeline(GraphicsPipeline* pipeline) const noexcept;
+    /// may be skipped while it builds (asynchronous shaders, CanDiscardPendingDraw, heavy skip).
+    [[nodiscard]] GraphicsPipeline* BuiltPipeline(GraphicsPipeline* pipeline);
+
+    /// EDEN_NX2_HEAVY_SKIP: the current draw's render target was also drawn to in one of the two
+    /// frames before this one, so it is redrawn every frame and a skipped draw only shows for a
+    /// moment. A target drawn once (a baked texture) would keep the missing draw.
+    [[nodiscard]] bool CurrentTargetIsRedrawn();
 
     std::unique_ptr<GraphicsPipeline> CreateGraphicsPipeline();
 
@@ -187,6 +195,18 @@ private:
     /// Destroys graphics pipelines unused for a while, once the GPU is done with them.
     void EvictUnusedPipelines();
     u64 frame_count{};
+
+    struct TargetFrames {
+        u64 last;     ///< Last frame the target was drawn to
+        u64 previous; ///< The frame before that one it was drawn to
+    };
+    std::unordered_map<u64, TargetFrames> target_frames; ///< Render target key -> frames
+    u64 last_target_key{~0ULL};
+    u64 last_target_frame{~0ULL};
+    bool last_target_redrawn{};
+    enum class TargetReason { Redrawn, NotCleared, NewTarget };
+    TargetReason last_target_reason{TargetReason::NotCleared};
+    std::unordered_map<u64, u64> cleared_frames; ///< Target address -> last frame it was cleared
     std::deque<std::pair<u64, std::unique_ptr<GraphicsPipeline>>> evicted_pipelines; ///< (tick, pipeline)
     std::unordered_set<u64> used_and_evicted; ///< Key hashes of pipelines used this session, evicted since
 

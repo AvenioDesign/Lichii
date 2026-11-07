@@ -1160,6 +1160,15 @@ void RasterizerVulkan::Clear(u32 layer_count) {
     if (!use_color && !use_depth && !use_stencil) {
         return;
     }
+    {
+        const u32 clear_rt = regs.clear_surface.RT;
+        const u64 color_address = use_color && clear_rt < Maxwell::NumRenderTargets
+                                      ? regs.rt[clear_rt].Address()
+                                      : 0;
+        const u64 depth_address =
+            (use_depth || use_stencil) && regs.zeta_enable != 0 ? regs.zeta.Address() : 0;
+        pipeline_cache.NoteClear(color_address, depth_address);
+    }
 
     std::scoped_lock lock{texture_cache.mutex};
     texture_cache.UpdateRenderTargets(true);

@@ -796,11 +796,26 @@ bool GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
         // Wait for the pipeline to be built
         scheduler.Record([this](vk::CommandBuffer) {
             const auto begin = std::chrono::steady_clock::now();
-            build->Wait(!worker_only_build);
-            hold_time_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                       std::chrono::steady_clock::now() - begin)
-                                       .count(),
-                                   std::memory_order::relaxed);
+            // With EDEN_NX2_HEAVY_SKIP the workers are busy with skipped heavy builds (seconds
+            // each); a held draw builds its own pipeline here instead of waiting behind them.
+            build->Wait(!worker_only_build || HeavySkipWords() != 0);
+            const auto held = std::chrono::steady_clock::now() - begin;
+            hold_time_ns.fetch_add(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(held).count(),
+                std::memory_order::relaxed);
+            if (held > std::chrono::milliseconds{100}) {
+                // Which held draws still freeze the game, and why they were not skipped.
+                static constexpr std::array<const char*, 6> reasons{
+                    "not native or skip off", "under the size limit", "writes storage",
+                    "target not cleared this frame", "new small target", "skipped earlier"};
+                LOG_INFO(Render_Vulkan,
+                         "Nx2Perf held_draw: {:016x} ({} instructions) held {:.0f} ms: {} ({} {}x{})",
+                         key.Hash(), source_words,
+                         std::chrono::duration<double, std::milli>(held).count(),
+                         reasons[std::min<size_t>(hold_reason, reasons.size() - 1)],
+                         hold_target_color ? "color" : "depth", hold_target_width,
+                         hold_target_height);
+            }
         });
     }
     const bool is_rescaling{texture_cache.IsRescaling()};
