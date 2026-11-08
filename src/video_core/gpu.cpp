@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <condition_variable>
 #include <list>
 #include <memory>
@@ -248,6 +249,20 @@ struct GPU::Impl {
             return raster_area;
         }
         raster_area.preemtive = true;
+        // EDEN_NX2_SKIP_READ_SYNC=1 (test only, may show stale data): no GPU wait on CPU reads, to
+        // measure how much frame rate the waits cost.
+        static const bool skip_sync = [] {
+            const char* value = std::getenv("EDEN_NX2_SKIP_READ_SYNC");
+            const bool on = value != nullptr && value[0] == '1';
+            if (on) {
+                LOG_WARNING(HW_GPU, "EDEN_NX2_SKIP_READ_SYNC=1: CPU reads of GPU-written memory "
+                                    "do not wait for the GPU (test)");
+            }
+            return on;
+        }();
+        if (skip_sync) {
+            return raster_area;
+        }
         // A guest CPU read of GPU-written memory (reactive flushing): count them, they decide
         // whether buffer data must be copied back at every fence (EDEN_NX2_BUFFER_DOWNLOADS).
         if (static std::atomic<u64> reads{}; (reads.fetch_add(1, std::memory_order_relaxed) & 63) == 0) {

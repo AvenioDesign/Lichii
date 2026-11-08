@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -2374,6 +2375,22 @@ bool RasterizerVulkan::HasPendingQueries(DAddr addr, u64 size) {
     return query_cache.IsRegionGpuModified(addr, size);
 }
 
+namespace {
+// Diagnostic build: which cache answers the guest CPU's reads of GPU-written memory.
+void CountFlushArea(int source, bool preemptive) {
+    static std::atomic<u64> counts[3][2]{};
+    static std::atomic<u64> total{};
+    counts[source][preemptive ? 1 : 0].fetch_add(1, std::memory_order_relaxed);
+    if (((total.fetch_add(1, std::memory_order_relaxed) + 1) & 1023) == 0) {
+        LOG_INFO(Render_Vulkan,
+                 "CPU read flush areas (last 1024 and before): texture cache {} wait / {} no wait, "
+                 "buffer cache {} / {}, untracked {} / {}",
+                 counts[0][0].load(), counts[0][1].load(), counts[1][0].load(), counts[1][1].load(),
+                 counts[2][0].load(), counts[2][1].load());
+    }
+}
+} // namespace
+
 VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64 size) {
     std::optional<VideoCore::RasterizerDownloadArea> texture_area;
     {
@@ -2381,6 +2398,7 @@ VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64
         texture_area = texture_cache.GetFlushArea(addr, size);
     }
     if (texture_area) {
+        CountFlushArea(0, texture_area->preemtive);
         // The core disarmed the read's pages before asking, and skips later reads in this area,
         // even through another device alias of those pages. The buffer cache arms only pages it
         // doesn't count as armed, so it must forget the whole area.
@@ -2393,9 +2411,11 @@ VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64
         std::scoped_lock lock{buffer_cache.mutex};
         auto area = buffer_cache.GetFlushArea(addr, size);
         if (area) {
+            CountFlushArea(1, area->preemtive);
             return *area;
         }
     }
+    CountFlushArea(2, true);
     VideoCore::RasterizerDownloadArea new_area{
         .start_address = Common::AlignDown(addr, Core::DEVICE_PAGESIZE),
         .end_address = Common::AlignUp(addr + size, Core::DEVICE_PAGESIZE),
