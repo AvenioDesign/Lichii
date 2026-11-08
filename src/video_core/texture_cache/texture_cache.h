@@ -680,7 +680,10 @@ bool TextureCache<P>::ResolveMemoizedTextures(SampledTextureMemo& memo,
         const SampledTextureMemo::Entry& entry = memo.entries[i];
         views[i] = ImageViewInOut{.index = entry.view_index, .blacklist = false, .id = entry.view};
         samplers[i] = entry.sampler;
-        PrepareImageView(entry.view, false, false);
+        // As in VisitImageView: the null image has nothing to upload and no valid format.
+        if (entry.view != NULL_IMAGE_VIEW_ID) {
+            PrepareImageView(entry.view, false, false);
+        }
     }
     if (has_deleted_images) {
         // Preparing an image deleted others: the full path resolves the views again.
