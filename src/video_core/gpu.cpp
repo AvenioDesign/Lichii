@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "common/assert.h"
+#include "common/nx2_stack.h"
 #include "common/settings.h"
 #include "common/settings_enums.h"
 #include "core/core.h"
@@ -250,9 +251,14 @@ struct GPU::Impl {
         // A guest CPU read of GPU-written memory (reactive flushing): count them, they decide
         // whether buffer data must be copied back at every fence (EDEN_NX2_BUFFER_DOWNLOADS).
         if (static std::atomic<u64> reads{}; (reads.fetch_add(1, std::memory_order_relaxed) & 63) == 0) {
-            LOG_INFO(HW_GPU, "CPU read of GPU-written memory [{:#x}, {:#x}) ({} so far)",
+            // Diagnostic build: who reads (host thread and host call stack, symbolize the
+            // +offsets against lichii.pdb) and what exactly (address and size of the read).
+            LOG_INFO(HW_GPU,
+                     "CPU read of GPU-written memory [{:#x}, {:#x}) ({} so far) read {:#x}+{} "
+                     "thread {} stack{}",
                      raster_area.start_address, raster_area.end_address,
-                     reads.load(std::memory_order_relaxed));
+                     reads.load(std::memory_order_relaxed), addr, size,
+                     Nx2Stack::CurrentThreadName(), Nx2Stack::CaptureModuleOffsets(0, 16));
         }
         const u64 fence = RequestSyncOperation([this, raster_area]() {
             // Apply collected guest writes before downloading GPU data over guest memory.
@@ -260,7 +266,46 @@ struct GPU::Impl {
             renderer->ReadRasterizer()->FlushRegion(raster_area.start_address, raster_area.end_address - raster_area.start_address);
         });
         gpu_thread.TickGPU(is_async);
+        const auto wait_begin = std::chrono::steady_clock::now();
         WaitForSyncOperation(fence);
+        // Diagnostic build: how long the reading thread is blocked, summed per 10 s window.
+        {
+            const u64 waited = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                    std::chrono::steady_clock::now() - wait_begin)
+                                                    .count());
+            static std::atomic<u64> window_reads{};
+            static std::atomic<u64> window_ns{};
+            static std::atomic<u64> window_max_ns{};
+            static std::atomic<s64> window_start{};
+            const s64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now().time_since_epoch())
+                                .count();
+            s64 start = window_start.load(std::memory_order_relaxed);
+            if (start == 0) {
+                window_start.compare_exchange_strong(start, now);
+                start = window_start.load(std::memory_order_relaxed);
+            }
+            window_reads.fetch_add(1, std::memory_order_relaxed);
+            window_ns.fetch_add(waited, std::memory_order_relaxed);
+            u64 max = window_max_ns.load(std::memory_order_relaxed);
+            while (waited > max &&
+                   !window_max_ns.compare_exchange_weak(max, waited, std::memory_order_relaxed)) {
+            }
+            if (now - start >= 10'000'000'000LL &&
+                window_start.compare_exchange_strong(start, now)) {
+                const u64 count = window_reads.exchange(0);
+                const u64 total = window_ns.exchange(0);
+                const u64 peak = window_max_ns.exchange(0);
+                const double seconds = static_cast<double>(now - start) / 1e9;
+                LOG_INFO(HW_GPU,
+                         "CPU reads of GPU-written memory in the last {:.1f} s: {} reads ({:.0f}/s), "
+                         "{:.1f} ms blocked per second, mean {:.0f} us, max {:.0f} us",
+                         seconds, count, static_cast<double>(count) / seconds,
+                         static_cast<double>(total) / 1e6 / seconds,
+                         count ? static_cast<double>(total) / 1e3 / static_cast<double>(count) : 0.0,
+                         static_cast<double>(peak) / 1e3);
+            }
+        }
         return raster_area;
     }
 
