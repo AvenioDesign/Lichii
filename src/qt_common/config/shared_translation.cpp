@@ -157,6 +157,11 @@ std::unique_ptr<TranslationMap> InitializeTranslations(QObject* parent) {
               "checked, when it can't run on this GPU, with resolution scaling, and for the rest "
               "of the session if its output fails Lichii's checks.\nTakes effect when a game "
               "starts."));
+    INSERT(Settings, frame_rate_limit, tr("Frame rate limit (Switch 2):"),
+           tr("Rate of the Switch 2 VSync event that games start their frames on (default 60 Hz)."
+              "\nAbove 60 Hz most games run too fast; use it with a game patch that follows real "
+              "time, such as \"FPS Unlock (built-in)\" for Ocarina of Time.\nTakes effect when a "
+              "game starts."));
     INSERT(Settings, fsr_sharpening_slider, tr("RCAS Sharpness:"),
            tr("Strength of RCAS (AMD's contrast-adaptive sharpening) on the upscaler used in place "
               "of a game's DLSS (AMD FSR 3.1); 0% turns it off.\nAlso sets the sharpening "
