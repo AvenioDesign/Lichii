@@ -89,8 +89,9 @@ GraphicsKey GraphicsEntryKey(u32 stage, const GraphicsKey& template_key, u64 sta
 
 /// Draw state statistics from runtime pipeline caches recorded by the game.
 struct RuntimeStats {
-    /// Most common FixedPipelineState per stage (index 0 vertex, 1 fragment), hash slots and
-    /// color output types zeroed. Empty when the caches have no record of that stage.
+    /// Draw state per stage (index 0 vertex, 1 fragment), hash slots zeroed: among the records
+    /// with the most common render target (samples, depth, color formats), the most common
+    /// FixedPipelineState. Empty when the caches have no record of that stage.
     std::array<std::optional<GraphicsKey>, 2> templates;
     /// Vertex stage hash -> attribute types (key bytes 112-119) of each unique occurrence.
     std::unordered_map<u64, std::vector<u64>> vertex_attributes;

@@ -26,8 +26,10 @@ then per entry (v52/v53 graphics layout):
     1056-byte GraphicsPipelineCacheKey:
         unique_hashes[6] u64: only this stage's slot set (vertex = slot 1, fragment = slot 5),
             value = NativeShaderHash = CityHash64(code bytes) ^ 0x4f554e4345000002
-        FixedPipelineState (1008 bytes) = the most common state among runtime records of the same
-            stage (key bytes 56-63, color output types, zeroed: irrelevant on NVIDIA)
+        FixedPipelineState (1008 bytes) = among runtime records of the same stage with the most
+            common render target (samples, depth on and format, color formats at key bytes
+            56-63), the most common state without the hash slots and attribute types. Libraries
+            are built for that render pass, so it must be one the game draws to
         vertex only: attribute types (key bytes 112-119, 2 bits per slot) = per slot, the most
             common nonzero value among runtime pipelines of the OTHER vertex shaders from the same
             game archive(s); slots with no data = 1 (float)
@@ -139,7 +141,22 @@ def runtime_records(path):
 
 def normalize(key):
     k = bytearray(key)
-    k[56:64] = bytes(8)  # color output types: always float on NVIDIA
+    k[56:64] = bytes(8)  # color formats: change the SPIR-V only on MoltenVK
+    return bytes(k)
+
+
+def render_target(key):
+    """Samples, depth on and depth format, and the 8 color formats: the render pass."""
+    raw1, raw2 = struct.unpack_from('<II', key, 48)
+    depth = (raw2 >> 5) & 1
+    return raw1 >> 28, depth, (raw2 >> 6) & 0x1f if depth else 0, bytes(key[56:64])
+
+
+def draw_state(key):
+    """The key without what differs per shader: hash slots and vertex attribute types."""
+    k = bytearray(key)
+    k[0:48] = bytes(48)
+    k[112:120] = bytes(8)
     return bytes(k)
 
 
@@ -216,13 +233,15 @@ def main():
                 occurrences.setdefault((raw, key), (stage, uh))
     template = {}
     for stage in SLOT:
-        stage_keys = [normalize(k) for (_, k), (s, _) in occurrences.items() if s == stage]
+        stage_keys = [k for (_, k), (s, _) in occurrences.items() if s == stage]
         if not stage_keys:
             sys.exit(f'no {stage} records in the runtime caches given: a draw state template '
                      f'for that stage cannot be derived (pass a cache from a played session)')
-        key = bytearray(mode(stage_keys))
-        key[0:48] = bytes(48)
-        template[stage] = bytes(key)
+        target = mode([render_target(k) for k in stage_keys])
+        same_target = [k for k in stage_keys if render_target(k) == target]
+        state = mode([draw_state(k) for k in same_target])
+        key = next(k for k in same_target if draw_state(k) == state)
+        template[stage] = bytes(48) + bytes(key[48:])
     runtime = collections.defaultdict(list)  # (stage, hash) -> [(raw env, key)]
     for (raw, key), (stage, uh) in occurrences.items():
         runtime[(stage, uh)].append((raw, key))

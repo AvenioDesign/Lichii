@@ -326,37 +326,69 @@ RuntimeStats ReadRuntimeStats(const std::vector<std::filesystem::path>& caches) 
 
     RuntimeStats stats;
     stats.occurrences = occurrences.size();
+    // The render pass part of a key: samples (key bytes 48-51, bits 28-31), depth on and depth
+    // format (bytes 52-55, bit 5 and bits 6-10) and the 8 color formats (bytes 56-63). Every
+    // library is built for one render pass, so the template takes the most common one first.
+    const auto render_target = [&](size_t i) {
+        const u8* const key = occurrences[i].key;
+        u32 raw1;
+        u32 raw2;
+        std::memcpy(&raw1, key + 48, sizeof(raw1));
+        std::memcpy(&raw2, key + 52, sizeof(raw2));
+        const bool depth = ((raw2 >> 5) & 1) != 0;
+        std::array<u8, 11> target{};
+        target[0] = static_cast<u8>(raw1 >> 28);
+        target[1] = depth ? 1 : 0;
+        target[2] = depth ? static_cast<u8>((raw2 >> 6) & 0x1f) : 0;
+        std::memcpy(target.data() + 3, key + 56, 8);
+        return Hash128(target);
+    };
+    // The rest of the draw state, without what differs per shader: the hash slots (bytes 0-47)
+    // and the vertex attribute types (overwritten per vertex entry anyway).
+    const auto draw_state = [&](size_t i) {
+        GraphicsKey normalized;
+        std::memcpy(normalized.data(), occurrences[i].key, normalized.size());
+        std::fill(normalized.begin(), normalized.begin() + 48, u8{0});
+        std::fill(normalized.begin() + AttributeTypesOffset,
+                  normalized.begin() + AttributeTypesOffset + 8, u8{0});
+        return Hash128(normalized);
+    };
     for (size_t index = 0; index < 2; ++index) {
         const u32 stage = index == 0 ? 0 : 4;
-        struct Count {
-            size_t count;
-            size_t first;
+        // Counter.most_common over the records of this stage that `keep` accepts: index of the
+        // first record of the group with the highest count, the first seen among equals.
+        const auto most_common = [&](const auto& group_of,
+                                     const auto& keep) -> std::optional<size_t> {
+            struct Count {
+                size_t count;
+                size_t first;
+            };
+            std::unordered_map<u128, Count, U128Hasher> counts;
+            for (size_t i = 0; i < occurrences.size(); ++i) {
+                if (occurrences[i].stage == stage && keep(i)) {
+                    ++counts.try_emplace(group_of(i), Count{0, i}).first->second.count;
+                }
+            }
+            const Count* best = nullptr;
+            for (const auto& [hash, count] : counts) {
+                if (best == nullptr || count.count > best->count ||
+                    (count.count == best->count && count.first < best->first)) {
+                    best = &count;
+                }
+            }
+            return best == nullptr ? std::nullopt : std::optional<size_t>{best->first};
         };
-        std::unordered_map<u128, Count, U128Hasher> counts;
-        GraphicsKey normalized;
-        for (size_t i = 0; i < occurrences.size(); ++i) {
-            if (occurrences[i].stage != stage) {
-                continue;
-            }
-            std::memcpy(normalized.data(), occurrences[i].key, normalized.size());
-            std::fill(normalized.begin() + 56, normalized.begin() + 64, u8{0});
-            ++counts.try_emplace(Hash128(normalized), Count{0, i}).first->second.count;
+        const auto target_record = most_common(render_target, [](size_t) { return true; });
+        if (!target_record) {
+            continue;
         }
-        // Counter.most_common: highest count, the first seen among equals.
-        const Count* best = nullptr;
-        for (const auto& [hash, count] : counts) {
-            if (best == nullptr || count.count > best->count ||
-                (count.count == best->count && count.first < best->first)) {
-                best = &count;
-            }
-        }
-        if (best != nullptr) {
-            GraphicsKey key;
-            std::memcpy(key.data(), occurrences[best->first].key, key.size());
-            std::fill(key.begin() + 56, key.begin() + 64, u8{0});
-            std::fill(key.begin(), key.begin() + 48, u8{0});
-            stats.templates[index] = key;
-        }
+        const u128 target = render_target(*target_record);
+        const auto state_record =
+            most_common(draw_state, [&](size_t i) { return render_target(i) == target; });
+        GraphicsKey key;
+        std::memcpy(key.data(), occurrences[*state_record].key, key.size());
+        std::fill(key.begin(), key.begin() + 48, u8{0});
+        stats.templates[index] = key;
     }
     for (const auto& occurrence : occurrences) {
         if (occurrence.stage == 0) {
