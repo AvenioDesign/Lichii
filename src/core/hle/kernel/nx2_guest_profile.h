@@ -43,6 +43,13 @@ private:
     std::chrono::steady_clock::time_point m_start;
 };
 
+class KSynchronizationObject;
+
+/// Adds one WaitSynchronization of @p thread to the per-object wait statistics: which objects
+/// (type, and the service's name for an event) the thread waited on, for how long in total.
+void Nx2NoteSyncWait(const KThread& thread, KSynchronizationObject* const* objs, s32 count,
+                     s64 timeout, u64 ns);
+
 /// Logs the guest thread profile of @p process when 10 s have passed since the last report.
 /// Cheap to call often (one clock read when no report is due).
 void Nx2GuestProfileMaybeReport(KernelCore& kernel, KProcess* process);

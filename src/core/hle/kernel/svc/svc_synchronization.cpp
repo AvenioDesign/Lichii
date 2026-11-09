@@ -4,6 +4,8 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <chrono>
+
 #include "common/scope_exit.h"
 #include "common/scratch_buffer.h"
 #include "core/core.h"
@@ -96,11 +98,16 @@ Result WaitSynchronization(Core::System& system, int32_t* out_index, u64 user_ha
     }
 
     // Wait on the objects.
+    const auto nx2_wait_start = std::chrono::steady_clock::now();
     Result res = [&] {
         Nx2SvcWaitScope wait_scope{system.Kernel(), KThread::Nx2WaitKind::Sync};
         return KSynchronizationObject::Wait(system.Kernel(), out_index, objs.data(), num_handles,
                                             timeout);
     }();
+    Nx2NoteSyncWait(GetCurrentThread(system.Kernel()), objs.data(), num_handles, timeout,
+                    static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                         std::chrono::steady_clock::now() - nx2_wait_start)
+                                         .count()));
 
     R_SUCCEED_IF(res == ResultSessionClosed);
     R_RETURN(res);

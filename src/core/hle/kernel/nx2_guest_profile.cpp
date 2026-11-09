@@ -4,8 +4,11 @@
 #include <algorithm>
 #include <array>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <fmt/format.h>
 
 #include "common/logging.h"
 #include "core/core.h"
@@ -13,10 +16,12 @@
 #include "core/hardware_properties.h"
 #include "core/hle/kernel/k_light_lock.h"
 #include "core/hle/kernel/k_process.h"
+#include "core/hle/kernel/k_readable_event.h"
 #include "core/hle/kernel/k_scheduler.h"
 #include "core/hle/kernel/k_thread.h"
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/nx2_guest_profile.h"
+#include "core/hle/service/kernel_helpers.h"
 
 namespace Kernel {
 namespace {
@@ -67,7 +72,49 @@ Snapshot Take(const KThread& thread) {
     return snap;
 }
 
+struct SyncStat {
+    u64 ns{};
+    u64 count{};
+};
+
+struct SyncStats {
+    std::mutex mutex;
+    std::unordered_map<std::string, SyncStat> by_key;
+};
+
+SyncStats& GetSyncStats() {
+    static SyncStats stats;
+    return stats;
+}
+
 } // Anonymous namespace
+
+void Nx2NoteSyncWait(const KThread& thread, KSynchronizationObject* const* objs, s32 count,
+                     s64 timeout, u64 ns) {
+    std::string key = fmt::format("thread {:#x}", thread.GetId());
+    key += timeout == 0 ? " poll:" : timeout < 0 ? " wait:" : " timed:";
+    for (s32 i = 0; i < count && i < 4; ++i) {
+        KSynchronizationObject* obj = objs[i];
+        if (obj == nullptr) {
+            continue;
+        }
+        key += ' ';
+        key += obj->GetTypeName();
+        if (const auto* event = obj->DynamicCast<KReadableEvent*>(); event != nullptr) {
+            key += '(';
+            key += Service::KernelHelpers::DebugEventName(event);
+            key += ')';
+        }
+    }
+    if (count > 4) {
+        key += fmt::format(" +{} more", count - 4);
+    }
+    auto& stats = GetSyncStats();
+    std::scoped_lock lock{stats.mutex};
+    auto& stat = stats.by_key[key];
+    stat.ns += ns;
+    ++stat.count;
+}
 
 void Nx2GuestProfileMaybeReport(KernelCore& kernel, KProcess* process) {
     if (process == nullptr) {
@@ -157,6 +204,25 @@ void Nx2GuestProfileMaybeReport(KernelCore& kernel, KProcess* process) {
                  row.waits_per_s[0], row.wait_ms_per_s[1], row.waits_per_s[1],
                  row.wait_ms_per_s[2], row.waits_per_s[2], row.wait_ms_per_s[3],
                  row.waits_per_s[3], row.pc, row.lr);
+    }
+
+    std::vector<std::pair<std::string, SyncStat>> sync_rows;
+    {
+        auto& stats = GetSyncStats();
+        std::scoped_lock sync_lock{stats.mutex};
+        sync_rows.assign(stats.by_key.begin(), stats.by_key.end());
+        stats.by_key.clear();
+    }
+    std::ranges::sort(sync_rows,
+                      [](const auto& a, const auto& b) { return a.second.ns > b.second.ns; });
+    for (size_t i = 0; i < (std::min<size_t>)(sync_rows.size(), 12); ++i) {
+        const auto& [key, stat] = sync_rows[i];
+        LOG_INFO(Kernel, "Nx2GuestProfile   sync {:.1f} ms/s ({:.0f}/s, mean {:.0f} us): {}",
+                 static_cast<double>(stat.ns) / 1e6 / wall_s,
+                 static_cast<double>(stat.count) / wall_s,
+                 stat.count ? static_cast<double>(stat.ns) / 1e3 / static_cast<double>(stat.count)
+                            : 0.0,
+                 key);
     }
 }
 
