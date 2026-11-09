@@ -15,6 +15,7 @@
 #include "core/hle/kernel/k_session.h"
 #include "core/hle/kernel/svc.h"
 #include "core/hle/kernel/svc_results.h"
+#include "core/hle/kernel/nx2_guest_profile.h"
 
 namespace Kernel::Svc {
 
@@ -30,7 +31,10 @@ Result SendSyncRequestImpl(KernelCore& kernel, uintptr_t message, size_t buffer_
     ASSERT(parent.IsNotNull());
 
     // Send the request.
-    const Result result = session->SendSyncRequest(kernel, message, buffer_size);
+    const Result result = [&] {
+        Nx2SvcWaitScope wait_scope{kernel, KThread::Nx2WaitKind::Ipc};
+        return session->SendSyncRequest(kernel, message, buffer_size);
+    }();
     if (R_SUCCEEDED(result)) {
         GetCurrentThread(kernel).WaitForStartupThreads(kernel);
     }

@@ -308,6 +308,23 @@ public:
         return m_cpu_time;
     }
 
+    /// Diagnostic build: wall time this thread spent inside blocking SVCs, by kind.
+    enum class Nx2WaitKind : u32 { Ipc, Sync, Lock, Sleep, Count };
+
+    void Nx2AddWait(Nx2WaitKind kind, u64 ns) {
+        const auto index = static_cast<u32>(kind);
+        m_nx2_wait_ns[index].fetch_add(ns, std::memory_order_relaxed);
+        m_nx2_wait_count[index].fetch_add(1, std::memory_order_relaxed);
+    }
+
+    u64 Nx2WaitNs(Nx2WaitKind kind) const {
+        return m_nx2_wait_ns[static_cast<u32>(kind)].load(std::memory_order_relaxed);
+    }
+
+    u64 Nx2WaitCount(Nx2WaitKind kind) const {
+        return m_nx2_wait_count[static_cast<u32>(kind)].load(std::memory_order_relaxed);
+    }
+
     s32 GetActiveCore() const {
         return m_core_id;
     }
@@ -892,6 +909,8 @@ private:
     KAffinityMask m_physical_affinity_mask{};
     u64 m_thread_id{};
     std::atomic<s64> m_cpu_time{};
+    std::array<std::atomic<u64>, static_cast<u32>(Nx2WaitKind::Count)> m_nx2_wait_ns{};
+    std::array<std::atomic<u64>, static_cast<u32>(Nx2WaitKind::Count)> m_nx2_wait_count{};
     KProcessAddress m_address_key{};
     KProcess* m_parent{};
     KVirtualAddress m_kernel_stack_top{};

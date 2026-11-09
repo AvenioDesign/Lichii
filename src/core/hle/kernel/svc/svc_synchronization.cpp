@@ -12,6 +12,7 @@
 #include "core/hle/kernel/k_readable_event.h"
 #include "core/hle/kernel/svc.h"
 #include "core/hle/kernel/svc_results.h"
+#include "core/hle/kernel/nx2_guest_profile.h"
 
 namespace Kernel::Svc {
 
@@ -95,7 +96,11 @@ Result WaitSynchronization(Core::System& system, int32_t* out_index, u64 user_ha
     }
 
     // Wait on the objects.
-    Result res = KSynchronizationObject::Wait(system.Kernel(), out_index, objs.data(), num_handles, timeout);
+    Result res = [&] {
+        Nx2SvcWaitScope wait_scope{system.Kernel(), KThread::Nx2WaitKind::Sync};
+        return KSynchronizationObject::Wait(system.Kernel(), out_index, objs.data(), num_handles,
+                                            timeout);
+    }();
 
     R_SUCCEED_IF(res == ResultSessionClosed);
     R_RETURN(res);

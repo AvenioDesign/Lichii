@@ -12,6 +12,7 @@
 #include "core/hle/kernel/svc.h"
 #include "core/hle/kernel/svc_results.h"
 #include "core/hle/kernel/svc_types.h"
+#include "core/hle/kernel/nx2_guest_profile.h"
 
 namespace Kernel::Svc {
 namespace {
@@ -69,6 +70,7 @@ Result WaitForAddress(Core::System& system, u64 address, ArbitrationType arb_typ
         timeout = timeout_ns;
     }
 
+    Nx2SvcWaitScope wait_scope{system.Kernel(), KThread::Nx2WaitKind::Lock};
     R_RETURN(
         GetCurrentProcess(system.Kernel()).WaitAddressArbiter(address, arb_type, value, timeout));
 }

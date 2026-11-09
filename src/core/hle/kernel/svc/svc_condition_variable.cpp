@@ -11,6 +11,7 @@
 #include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/svc.h"
 #include "core/hle/kernel/svc_results.h"
+#include "core/hle/kernel/nx2_guest_profile.h"
 
 namespace Kernel::Svc {
 
@@ -41,6 +42,7 @@ Result WaitProcessWideKeyAtomic(Core::System& system, u64 address, u64 cv_key, u
     }
 
     // Wait on the condition variable.
+    Nx2SvcWaitScope wait_scope{system.Kernel(), KThread::Nx2WaitKind::Lock};
     R_RETURN(
         GetCurrentProcess(system.Kernel())
             .WaitConditionVariable(address, Common::AlignDown(cv_key, sizeof(u32)), tag, timeout));

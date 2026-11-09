@@ -8,6 +8,7 @@
 #include "core/hle/kernel/k_memory_layout.h"
 #include "core/hle/kernel/k_process.h"
 #include "core/hle/kernel/svc.h"
+#include "core/hle/kernel/nx2_guest_profile.h"
 
 namespace Kernel::Svc {
 
@@ -20,6 +21,7 @@ Result ArbitrateLock(Core::System& system, Handle thread_handle, u64 address, u3
     R_UNLESS(!IsKernelAddress(address), ResultInvalidCurrentMemory);
     R_UNLESS(Common::IsAligned(address, sizeof(u32)), ResultInvalidAddress);
 
+    Nx2SvcWaitScope wait_scope{system.Kernel(), KThread::Nx2WaitKind::Lock};
     R_RETURN(KConditionVariable::WaitForAddress(system.Kernel(), thread_handle, address, tag));
 }
 

@@ -56,6 +56,7 @@
 #include "core/hle/kernel/k_thread.h"
 #include "core/hle/kernel/k_transfer_memory.h"
 #include "core/hle/kernel/svc_results.h"
+#include "core/hle/kernel/nx2_guest_profile.h"
 #include "core/memory.h"
 #include "video_core/host1x/host1x.h"
 #include "video_core/host1x/nx2_video_decoder.h"
@@ -1976,6 +1977,8 @@ private:
      * @param process Owning process, for the Mario Kart World dynamic FPS case; may be null.
      */
     void PaceToVblank(u32 timing, const Kernel::KProcess* process) {
+        // Diagnostic build: guest thread profile every 10 s (busy time and SVC waits per thread).
+        Kernel::Nx2GuestProfileMaybeReport(kernel, const_cast<Kernel::KProcess*>(process));
         const bool trace = Common::DkbFrameTrace::Enabled();
         if (trace) {
             if (m_frame_trace.previous_word && *m_frame_trace.previous_word != timing) {

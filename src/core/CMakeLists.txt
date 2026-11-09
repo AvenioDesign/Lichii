@@ -336,6 +336,8 @@ add_library(core STATIC
     hle/kernel/k_system_resource.h
     hle/kernel/k_thread.cpp
     hle/kernel/k_thread.h
+    hle/kernel/nx2_guest_profile.cpp
+    hle/kernel/nx2_guest_profile.h
     hle/kernel/k_thread_local_page.cpp
     hle/kernel/k_thread_local_page.h
     hle/kernel/k_thread_queue.cpp
